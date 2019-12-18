@@ -1,0 +1,441 @@
+
+# coding: utf-8
+
+# In[47]:
+
+
+#imports here
+import pandas as pd
+import numpy as np
+from collections import OrderedDict
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler 
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression #(fit_intercept=True, normalize=False, copy_X=True, n_jobs=1)
+from sklearn.svm import SVC #(C=1.0, kernel=’rbf’, degree=3, gamma=’auto’, coef0=0.0, shrinking=True, probability=False, tol=0.001, cache_size=200, class_weight=None, verbose=False, max_iter=-1, decision_function_shape=’ovr’, random_state=None)
+from sklearn.metrics import f1_score
+from sklearn.neighbors import KNeighborsClassifier #(n_neighbors=5, weights=’uniform’, algorithm=’auto’, leaf_size=30, p=2, metric=’minkowski’, metric_params=None, n_jobs=1, **kwargs)
+from sklearn.metrics import mean_squared_error as mse
+from sklearn.metrics import r2_score
+
+
+# In[2]:
+
+
+calendar = pd.read_csv("calendar.csv")
+listings = pd.read_csv("listings.csv")
+reviews = pd.read_csv("reviews.csv")
+listings.shape
+
+
+# In[3]:
+
+
+#analyze calendar 
+print(calendar.head())
+nans = pd.DataFrame(listings.isnull().mean(), columns = ["mean_nan"])
+nans = nans[nans["mean_nan"]>0.0]
+nans = nans.sort_values("mean_nan", ascending = False)
+nans
+
+
+# In[4]:
+
+
+#analyze listings
+(listings.head())
+print(listings.shape)
+listings["host_name"][listings.host_neighbourhood == listings.neighbourhood].shape
+
+
+# In[5]:
+
+
+#listing analysis continues
+print(listings.isnull().mean())
+print(listings.shape)
+print(listings.columns)
+
+
+# In[6]:
+
+
+#listings[["neighbourhood"]].fillna(value="", axis=1)
+groups = (listings.groupby("neighbourhood", axis = 0))
+hoods = {}
+#hoods = []
+for name,group in groups:
+    #hood["name"] = name
+    #hood["listings"] = group.shape[0]
+    hoods.update({name:int(group.shape[0])})
+    print (name)
+    print (group.shape[0])
+
+
+# In[7]:
+
+
+print(hoods)
+#hoods = (hoods.items())
+sorted_hoods_with_listings = sorted(hoods.items(), key=lambda x: x[1], reverse=True )
+sorted_hoods_with_listings = dict(sorted_hoods_with_listings)
+#print(type(list(sorted_hoods_with_listings.keys())))
+plt.subplots(figsize=(35,25))
+g = sns.barplot(x = list(sorted_hoods_with_listings.keys())[0:20], y = list(sorted_hoods_with_listings.values())[0:20], errcolor ="b")
+g.set_xticklabels(labels =list(sorted_hoods_with_listings.keys())[0:20] , rotation=90)
+g.set(xlabel='Neighbourhood', ylabel='Number of listings')
+g.set_title("A View of Listings count per Neibourhood")
+sns.set(font_scale = 3)
+plt.show()
+
+
+# In[8]:
+
+
+from collections import Counter
+print(Counter(listings.isnull().mean()))
+
+
+# In[9]:
+
+
+#clean price data by removing the dollar sign and converting to float
+#Columns with prices are [price,weekly_price,monthly_price,security_deposit,cleaning_fee,guests_included,extra_people]
+
+func1 = lambda a: a.replace('$','')
+func2 = lambda a: a.replace(',','')
+
+price_cols = ["price","weekly_price","monthly_price","security_deposit","cleaning_fee","guests_included","extra_people"]
+for temp in price_cols:
+    listings[temp] = listings[temp].astype("str")
+    listings[temp] = listings[temp].apply(func1)
+    listings[temp] = listings[temp].apply(func2)
+    listings[temp] = listings[temp].astype("float")
+    
+
+
+# In[10]:
+
+
+#neighbourhood with most expensive listing
+#print(listings["weekly_price"].isnull().mean())
+hood_price = listings[["price", "neighbourhood"]][listings["price"] > listings["price"].mean()]
+hood_price = hood_price.sort_values("price", ascending = False)
+hood_price = hood_price.iloc[0:20,:]
+g = sns.barplot(data = hood_price, x = "neighbourhood", y = "price")
+g.set_xticklabels(labels =hood_price["neighbourhood"] , rotation=90)
+g.set_title("Neighbouhood listing Prices")
+sns.set(font_scale = 2)
+
+plt.show()
+
+
+# In[11]:
+
+
+hood_price
+
+
+# In[12]:
+
+
+#What are the currently available listings with entire home apartments, which got a review in the last 6 months?
+calendar["date"] = pd.to_datetime(calendar["date"]).dt.date
+
+
+# In[13]:
+
+
+import datetime
+t = datetime.datetime.strptime('25122016', "%d%m%Y").date()
+print(t.day)
+type(calendar["date"][0])
+new_year_listings = calendar[["listing_id","date"]][calendar["date"] == t]
+final = pd.merge(listings[["id","name","price","neighbourhood"]], new_year_listings, left_on = 'id', right_on = 'listing_id')
+final
+
+
+# In[14]:
+
+
+final.drop_duplicates(["neighbourhood"])
+groups = final.groupby(["neighbourhood","price"], axis = 0, sort = True)
+sorted_df = final.sort_values(by=['price'], ascending = False)
+#sorted_df
+hoods_count = Counter(final["neighbourhood"])
+hoods_count = hoods_count.most_common()
+hoods_count = hoods_count[1:]
+hoods = []
+count = []
+for i in (hoods_count[:10]):
+    hoods.append(i[0])
+    count.append(i[1])
+print(hoods)
+print(count)
+
+
+# In[15]:
+
+
+#Draw seaborn pie chart
+explode = (0.1, 0, 0, 0,0,0,0,0,0,0)
+plt.subplots(figsize=(30,30))
+patches, texts,_ = plt.pie(count,autopct='%1.0f%%',pctdistance=0.5, explode=explode, shadow=True, startangle=140)
+plt.legend(patches, hoods, loc="best")
+plt.axis('equal')
+plt.tight_layout()
+sns.set(font_scale = 6)
+plt.show()
+
+
+# In[16]:
+
+
+#predict the price of the net rbnb
+Xy = listings[["id", "description", "reviews_per_month", "square_feet", "amenities", "bed_type","beds", "bedrooms", "bathrooms","accommodates", "room_type", "property_type","price"]]
+#y = listings["price"]
+
+temp = listings[["id", "description", "reviews_per_month", "square_feet", "amenities", "bed_type","beds", "bedrooms", "bathrooms","accommodates", "room_type", "property_type","price"]]
+
+
+# In[17]:
+
+
+Xy.head()
+
+
+# In[18]:
+
+
+Xy["square_feet"].isnull().mean()
+
+
+# The square feet information is practically absent, with more that 97% of values being null. This column doesn't provide much information, and should be droped.
+
+# In[19]:
+
+
+Xy = Xy.drop("square_feet", axis=1)
+Xy.shape
+
+
+# The Amenities column consist of a set of house equipments, each embeded as string, and needs to be extracted as a list.
+# This set is very important as they directly correlated with the pricing of a listing
+
+# In[20]:
+
+
+Xy.amenities = Xy.amenities.apply(lambda x: x.replace("\"",""))
+Xy.amenities = Xy.amenities.apply(lambda x: x.replace("{",""))
+Xy.amenities = Xy.amenities.apply(lambda x: x.replace("}",""))
+Xy.amenities = Xy.amenities.apply(lambda x: x.split(","))
+
+
+# In[21]:
+
+
+#X.amenities[0:10]
+#for temp in X.amenities:
+print(Xy.amenities[len(Xy.amenities)-1])
+print(Xy.amenities[0])
+print(Xy.amenities[10])
+print(Xy.amenities[9])
+print(Xy.amenities[11])
+print(Xy.amenities[30])
+
+
+
+
+
+# Being one of the most important factors contributing to the price of an RBNB, the following columns from the amenities preprocessed lists where added to the set of predicve attribute for the price:
+# 
+# ['TV', 'Cable TV', 'Wireless Internet', 'Kitchen', 'Free Parking on Premises', 'Indoor Fireplace', 'Heating', 'Smoke Detector', 'Carbon Monoxide Detector', 'Fire Extinguisher', 'Essentials', 'Shampoo','Elevator in Building','Washer','Dryer','Hangers','Iron','Laptop Friendly Workplace','First Aid Kit','Air Conditioning','Family/Kid Friendly','Carbon Monoxide Detector']
+# 
+
+# In[22]:
+
+
+amenities = pd.DataFrame(columns = ['TV', 'Cable TV', 'Wireless Internet', 'Kitchen', 'Free Parking on Premises', 'Indoor Fireplace', 'Heating', 'Smoke Detector', 'Carbon Monoxide Detector', 'Fire Extinguisher', 'Essentials', 'Shampoo','Elevator in Building','Washer','Dryer','Hangers','Iron','Laptop Friendly Workplace','First Aid Kit','Air Conditioning','Family/Kid Friendly','Carbon Monoxide Detector'])
+
+
+# In[23]:
+
+
+for i in range(0,len(Xy.amenities)):
+    is_available_list = []
+    for col in amenities.columns:
+        #print(type(col))
+        #print(X.amenities[0])
+        if col in Xy.amenities[i]:
+            is_available_list.append(int(1))
+        else:
+            is_available_list.append(int(0))
+    
+    amenities.loc[i] = is_available_list
+            
+        
+
+
+# The description attribute was counted as a main price determinant as well, given that it correlates with pricing as well. Nonetheless, descriptions here are in string format of very long text which would correspond to a large number of additional columns if one-hot encoded via Natural Language Processing for instance. Adding such a large number of attributes would adversely hinder the predicitve performance, given that there are only 3,818 samples.   
+
+# In[24]:
+
+
+#append amenities to the original X dataframe
+Xy = pd.concat([Xy,amenities], axis =1)
+#remove the amenities column
+Xy = Xy.drop("amenities", axis=1)
+Xy = Xy.drop("description", axis=1)
+Xy_final = Xy.copy()
+
+
+# In[25]:
+
+
+print(Xy_final.shape)
+print (amenities.shape)
+Xy_final.columns
+
+
+# In[26]:
+
+
+Xy_final = Xy_final.drop("id", axis=1)
+Xy_final.shape
+
+
+# In[27]:
+
+
+Xy_final.head()
+
+
+# In[28]:
+
+
+#Generate correlation matrix
+cor_data= Xy_final.copy()
+#cor_data = cor_data.join(y)
+corrmat = cor_data.corr(method = 'spearman')
+f, ax = plt.subplots(figsize=(10, 10))
+sns.heatmap(corrmat, vmax=.8, square=True)
+sns.set(font_scale = 2)
+plt.show()
+
+
+# In[29]:
+
+
+#get dummies (encode categoricals)
+Xy_final = pd.get_dummies(Xy_final, dummy_na=True, columns=["bed_type","room_type","property_type"])
+
+
+# In[30]:
+
+
+print (Xy_final.shape)
+Xy_final.isnull().mean()
+
+
+# Juste four columns (reviews_per_month, beds, bedrooms, bathrooms) contains null values, and a minimal percentage of each were null thus, they were replaced by the mean of those columns.  
+
+# In[31]:
+
+
+func = lambda a:a.fillna(a.mean())
+
+Xy_final = Xy_final.apply(func)
+
+
+# Now we split the dataset into training and testing, the predict prices, using the folowing ML models:
+# Linear Regresion
+# SVM
+# KNN
+
+# In[36]:
+
+
+y_final = Xy_final["price"]
+X_final = Xy_final.drop("price", axis = 1)
+print(y_final.shape)
+print(X_final.shape)
+
+X_train, X_test, y_train, y_test =  train_test_split(X_final, y_final, test_size= 0.25, random_state = 40)
+
+
+# Lets Scale or data with mean 0 and standard deviation of 1. This avoids negative effects from outliers  
+
+# In[39]:
+
+
+
+scaler = StandardScaler(copy=True, with_mean=True, with_std=True)
+scale = scaler.fit(X_train,y_train)
+X_train_scaled = scaler.transform(X_train,y_train)
+
+#print(type(Xy_final_scaled))
+X_train_scaled.shape
+
+
+# We will use Linear Regression as model, given that we identify the price as a continuous variable
+
+# In[40]:
+
+
+model = LinearRegression()
+model.fit(X_train_scaled, y_train)
+predicted_train_price = model.predict(X_train)
+
+
+# To avoid cheating (or a pipeline leak from the train to test data), lets scale our test data, using the mean and standard deviation obtained by the scaler fitted on train data
+
+# In[41]:
+
+
+X_test_scaled = scaler.transform(X_test,y_test)
+predicted_test_price = model.predict(X_test_scaled)
+
+
+# In[42]:
+
+
+
+fig, ax = plt.subplots(figsize=(10, 10))
+ax.scatter(y_test,predicted_test_price, color = 'black')
+#plt.plot(y_test, predicted_test_price, color='blue', linewidth=3)
+ax.plot([y_test.min(),400],[y_test.min(),400], color = "blue", linestyle = "solid")
+ax.plot([400,1000],[400,1000], "r--")
+
+ax.set_xlabel('Actual Test Price', fontsize = 15)
+ax.set_ylabel('Predicted Test Price', fontsize = 15)
+ax.set_title("A Scatter plot of Actual against Predicted test Price", fontsize = 15)
+#ax.set(font_scale = 1)
+
+
+plt.show()
+
+
+# In[50]:
+
+
+#def model_result(X_train,X_test, y_train, y_test, model, score):
+#y_test.min()
+train_mse_score  = mse(y_train, predicted_train_price)
+test_mse_score = mse(y_test, predicted_test_price)
+print("The train score is {}".format(train_mse_score))
+print("The test score is {}".format(test_mse_score))
+
+
+
+# In[49]:
+
+
+#def model_result(X_train,X_test, y_train, y_test, model, score):
+#y_test.min()
+train_rmse_score  = r2_score(y_train, predicted_train_price)
+test_rmse_score = r2_score(y_test, predicted_test_price)
+print("The train score is {}".format(train_rmse_score))
+print("The test score is {}".format(test_rmse_score))
+
+
